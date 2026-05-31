@@ -1,0 +1,5 @@
+tzapu/WiFiManager @ ^2.0.17
+https://github.com/squix78/esp8266-oled-ssd1306.git
+https://github.com/PaulStoffregen/XPT2046_Touchscreen.git
+bblanchon/ArduinoJson @ ^7.0.0
+bodmer/TFT_eSPI @ ^2.5.43
