@@ -2,7 +2,7 @@
 
 // ── Default URLs (ตั้งค่าจริงผ่าน WiFiManager portal) ──────────────────────────
 #define PRIMARY_API_URL "https://cyd-dashboard.vercel.app/api/dashboard"
-#define BACKUP_API_URL  "http://192.168.0.118:3000/api/dashboard"
+#define BACKUP_API_URL  "http://192.168.0.102:3001/api/dashboard"
 
 // ── Refresh interval ──────────────────────────────────────────────────────────
 #define UPDATE_INTERVAL 60000UL
