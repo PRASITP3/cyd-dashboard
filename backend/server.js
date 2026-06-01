@@ -193,6 +193,7 @@ app.get('/api/dashboard', async (req, res) => {
   const d = await fetchDashboardData();
 
   const cc = readClaudeCodeUsage();
+  console.log('[/api/dashboard] cc:', !!cc, cc ? Object.keys(cc) : 'null');
 
   if (d) {
     const dayPct  = Math.min(100, Math.round(d.day.totalTokens  / dailyLimit  * 100));
@@ -215,6 +216,7 @@ app.get('/api/dashboard', async (req, res) => {
     month:     { inputTokens: ld.i, outputTokens: ld.o, totalTokens: ld.i + ld.o },
     week:      { totalTokens: lw, pct: Math.min(100, Math.round(lw / weeklyLimit * 100)), limit: weeklyLimit },
     day:       { totalTokens: ly, pct: Math.min(100, Math.round(ly / dailyLimit  * 100)), limit: dailyLimit  },
+    claudeCode: cc,
     source:    'local',
     updatedAt: new Date().toISOString(),
   });
@@ -272,7 +274,12 @@ app.delete('/api/usage', (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/health', (_req, res) => res.json({ ok: true, anthropicAdminKey: !!process.env.ANTHROPIC_ADMIN_KEY }));
+app.get('/health', (_req, res) => res.json({ ok: true, anthropicAdminKey: !!process.env.ANTHROPIC_ADMIN_KEY, timestamp: new Date().toISOString() }));
+
+app.get('/api/test', (req, res) => {
+  const cc = readClaudeCodeUsage();
+  res.json({ cc, ccNull: cc === null, ccKeys: cc ? Object.keys(cc) : null });
+});
 
 // ── Start (local) / Export (Vercel) ──────────────────────────────────────────
 if (require.main === module) {
