@@ -296,7 +296,7 @@ bool fetchFromUrl(const char* url, const char* label) {
 
   int code = http.GET();
   if (code == HTTP_CODE_OK) {
-    JsonDocument doc;
+    DynamicJsonDocument doc(1024);
     if (!deserializeJson(doc, http.getString())) {
       JsonVariant cc = doc["claudeCode"];
       if (!cc.isNull()) {
