@@ -156,11 +156,7 @@ void drawHomeScreen() {
            timeinfo->tm_mday, timeinfo->tm_mon + 1, timeinfo->tm_year + 1900);
   tft.drawString(dateStr, 160, CONTENT_Y + 135);
 
-  // Status
-  if (g_data.valid) {
-    tft.setTextFont(1); tft.setTextColor(C_DGRAY, C_BG);
-    tft.drawString("Data: " + g_data.srcLabel, 160, CONTENT_Y + 160);
-  }
+  // Status (source shown at bottom of screen)
 }
 
 void drawSection(int y, const CCPeriod& period) {
