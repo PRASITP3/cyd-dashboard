@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server.js",
-    "dev": "node --disable-warning=ExperimentalWarning --watch server.js"
+    "dev": "node --disable-warning=ExperimentalWarning --watch server.js",
+    "upload": "node upload-cc.js",
+    "upload:watch": "node upload-cc.js --watch"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

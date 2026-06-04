@@ -6,6 +6,15 @@ const { DatabaseSync } = require('node:sqlite');
 const os   = require('os');
 const path = require('path');
 const fs   = require('fs');
+const { readClaudeCodeUsage } = require('./lib/cc-usage');
+const { getCcFromSupabase, getPortfolio } = require('./lib/supabase');
+const { fetchQuotes }         = require('./lib/yahoo');
+
+// Claude Code usage: read local ~/.claude logs when available (local server),
+// otherwise fall back to the snapshot in Supabase (Vercel / any cloud host).
+async function getClaudeCode() {
+  return readClaudeCodeUsage() || await getCcFromSupabase();
+}
 
 const app = express();
 app.use(express.json());
@@ -104,86 +113,6 @@ async function fetchDashboardData() {
   return data;
 }
 
-// ── Claude Code local usage ───────────────────────────────────────────────────
-let _ccCache = null, _ccCacheAt = 0;
-
-// Claude Sonnet pricing ($/M tokens) — used for API equiv. cost
-const PRICE = { input: 3.00, cacheRead: 0.30, cacheWrite: 3.75, output: 15.00 };
-
-function calcCost(p) {
-  return (p.input * PRICE.input + p.cacheRead * PRICE.cacheRead +
-          p.cacheWrite * PRICE.cacheWrite + p.output * PRICE.output) / 1_000_000;
-}
-
-function readClaudeCodeUsage() {
-  if (_ccCache && Date.now() - _ccCacheAt < CACHE_TTL) return _ccCache;
-
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-  if (!fs.existsSync(claudeDir)) return null;
-
-  const now     = new Date();
-  const monthMs = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-  const weekMs  = now.getTime() - 7 * 24 * 3600 * 1000;
-  const todayMs = new Date(now).setHours(0, 0, 0, 0);
-
-  const empty = () => ({ input:0, cacheRead:0, cacheWrite:0, output:0, sessions: new Set(), messages:0 });
-  let month = empty(), week = empty(), day = empty();
-
-  try {
-    const projectDirs = fs.readdirSync(claudeDir, { withFileTypes: true })
-      .filter(d => d.isDirectory())
-      .map(d => path.join(claudeDir, d.name));
-
-    for (const dir of projectDirs) {
-      for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'))) {
-        const lines = fs.readFileSync(path.join(dir, file), 'utf8').split('\n');
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const obj = JSON.parse(line);
-            if (obj.type !== 'assistant') continue;
-            const usage = obj.message?.usage;
-            if (!usage) continue;
-
-            const ts  = new Date(obj.timestamp).getTime();
-            const sid = obj.sessionId || '';
-            const inp = usage.input_tokens || 0;
-            const cr  = usage.cache_read_input_tokens || 0;
-            const cw  = (usage.cache_creation_input_tokens || 0)
-                      + (usage.cache_creation?.ephemeral_1h_input_tokens || 0)
-                      + (usage.cache_creation?.ephemeral_5m_input_tokens || 0);
-            const out = usage.output_tokens || 0;
-
-            const add = (p) => {
-              p.input += inp; p.cacheRead += cr; p.cacheWrite += cw;
-              p.output += out; p.messages++; if (sid) p.sessions.add(sid);
-            };
-            if (ts >= monthMs) add(month);
-            if (ts >= weekMs)  add(week);
-            if (ts >= todayMs) add(day);
-          } catch (_) {}
-        }
-      }
-    }
-  } catch (err) { console.error('[Claude Code]', err.message); return null; }
-
-  const fmt = (p) => ({
-    inputTokens:  p.input,
-    cacheRead:    p.cacheRead,
-    cacheWrite:   p.cacheWrite,
-    outputTokens: p.output,
-    totalTokens:  p.input + p.cacheRead + p.cacheWrite + p.output,
-    costUsd:      Math.round(calcCost(p) * 100) / 100,
-    sessions:     p.sessions.size,
-    messages:     p.messages,
-  });
-
-  const result = { month: fmt(month), week: fmt(week), day: fmt(day) };
-  _ccCache   = result;
-  _ccCacheAt = Date.now();
-  return result;
-}
-
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 app.get('/api/dashboard', async (req, res) => {
@@ -192,7 +121,7 @@ app.get('/api/dashboard', async (req, res) => {
 
   const d = await fetchDashboardData();
 
-  const cc = readClaudeCodeUsage();
+  const cc = await getClaudeCode();
   console.log('[/api/dashboard] cc:', !!cc, cc ? Object.keys(cc) : 'null');
 
   if (d) {
@@ -223,10 +152,42 @@ app.get('/api/dashboard', async (req, res) => {
 });
 
 /** GET /api/claudecode — Claude Code local session usage */
-app.get('/api/claudecode', (req, res) => {
-  const cc = readClaudeCodeUsage();
+app.get('/api/claudecode', async (req, res) => {
+  const cc = await getClaudeCode();
   if (!cc) return res.status(503).json({ error: 'Claude Code data not found' });
   res.json({ ...cc, source: 'claude-code', updatedAt: new Date().toISOString() });
+});
+
+/** GET /api/stocks — portfolio with live market price + auto %U.PL (Yahoo) */
+app.get('/api/stocks', async (req, res) => {
+  const pf = await getPortfolio();
+  const quotes = await fetchQuotes(pf.map(p => p.symbol));
+  const mktBy = {};
+  for (const q of quotes) mktBy[q.sym] = q.last;   // q.sym is already stripped of .BK
+  const r2 = (n) => n == null ? null : Math.round(n * 100) / 100;
+
+  let cost = 0, value = 0;
+  const holdings = pf.map(p => {
+    const sym = (p.display || p.symbol).replace(/\.BK$/i, '');
+    const mkt = mktBy[sym] ?? null;
+    const avg = p.avg ?? null;
+    const upl = (mkt != null && avg) ? Math.round(((mkt - avg) / avg) * 10000) / 100 : null;
+    if (mkt != null && avg != null) { cost += p.vol * avg; value += p.vol * mkt; }
+    return { sym, vol: p.vol, avg: r2(avg), mkt: r2(mkt), upl };
+  });
+
+  // Always sort by %U.PL high → low; holdings with no market price (N/A) last.
+  holdings.sort((a, b) => (b.upl ?? -Infinity) - (a.upl ?? -Infinity));
+
+  const totalUpl = value - cost;
+  const total = {
+    cost:  r2(cost),
+    value: r2(value),
+    upl:   r2(totalUpl),
+    pct:   cost ? Math.round((totalUpl / cost) * 10000) / 100 : null,
+  };
+
+  res.json({ holdings, total, count: holdings.length, source: 'yahoo', updatedAt: new Date().toISOString() });
 });
 
 app.get('/api/usage', async (req, res) => {
@@ -276,9 +237,11 @@ app.delete('/api/usage', (_req, res) => {
 
 app.get('/health', (_req, res) => res.json({ ok: true, anthropicAdminKey: !!process.env.ANTHROPIC_ADMIN_KEY, timestamp: new Date().toISOString() }));
 
-app.get('/api/test', (req, res) => {
-  const cc = readClaudeCodeUsage();
-  res.json({ cc, ccNull: cc === null, ccKeys: cc ? Object.keys(cc) : null });
+app.get('/api/test', async (req, res) => {
+  const local = readClaudeCodeUsage();
+  const cc = local || await getCcFromSupabase();
+  res.json({ cc, source: local ? 'local' : (cc ? 'supabase' : 'none'),
+             ccNull: cc == null, ccKeys: cc ? Object.keys(cc) : null });
 });
 
 // ── Start (local) / Export (Vercel) ──────────────────────────────────────────

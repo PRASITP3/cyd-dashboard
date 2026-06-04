@@ -7,6 +7,12 @@
 // ── Refresh interval ──────────────────────────────────────────────────────────
 #define UPDATE_INTERVAL 60000UL
 
+// ── Stock watchlist firmware (env:stocks) ─────────────────────────────────────
+#define STOCKS_API_URL         "https://cyd-dashboard.vercel.app/api/stocks"
+#define STOCKS_BACKUP_URL      "http://192.168.0.102:3001/api/stocks"
+#define STOCKS_UPDATE_INTERVAL 120000UL   // 2 min
+#define STOCKS_PAGE_MS         8000UL     // auto-flip page every 8s
+
 // ── NTP Server ────────────────────────────────────────────────────────────────
 #define NTP_SERVER "pool.ntp.org"
 #define TZ_OFFSET (7 * 3600)  // Thailand UTC+7
